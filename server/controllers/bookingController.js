@@ -113,13 +113,33 @@ exports.bookEvent = async (req, res) => {
 exports.confirmBooking = async (req, res) => {
     try {
         const { paymentStatus } = req.body; // 'paid' or 'not_paid'
-        const booking = await Booking.findById(req.params.id).populate('userId').populate('eventId');
-        if (!booking) return res.status(404).json({ message: 'Booking not found' });
+        if (paymentStatus && !['paid', 'not_paid'].includes(paymentStatus)) {
+            return res.status(400).json({ message: 'Invalid payment status' });
+        }
 
-        if (booking.status === 'confirmed') return res.status(400).json({ message: 'Booking is already confirmed' });
+        // Claim the pending booking first. This stops two concurrent admin
+        // requests from both confirming it and deducting two seats.
+        const booking = await Booking.findOneAndUpdate(
+            { _id: req.params.id, status: 'pending' },
+            { $set: { status: 'payment_processing' } },
+            { new: true },
+        ).populate('userId').populate('eventId');
 
-        const event = await Event.findById(booking.eventId._id);
-        if (event.availableSeats <= 0) {
+        if (!booking) {
+            const existingBooking = await Booking.findById(req.params.id);
+            if (!existingBooking) return res.status(404).json({ message: 'Booking not found' });
+            return res.status(409).json({ message: 'Booking is no longer pending' });
+        }
+
+        // Atomically decrement inventory so separate bookings cannot oversell
+        // the last remaining seat.
+        const event = await Event.findOneAndUpdate(
+            { _id: booking.eventId._id, availableSeats: { $gt: 0 } },
+            { $inc: { availableSeats: -1 } },
+            { new: true },
+        );
+        if (!event) {
+            await Booking.findByIdAndUpdate(booking._id, { $set: { status: 'pending' } });
             return res.status(400).json({ message: 'No seats available to confirm this booking' });
         }
 
@@ -128,9 +148,6 @@ exports.confirmBooking = async (req, res) => {
             booking.paymentStatus = paymentStatus;
         }
         await booking.save();
-
-        event.availableSeats -= 1;
-        await event.save();
 
         // Send email on admin confirmation
         await sendBookingEmail(booking.userId.email, booking.userId.name, booking.eventId.title);
@@ -160,6 +177,9 @@ exports.cancelBooking = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized' });
         }
         if (booking.status === 'cancelled') return res.status(400).json({ message: 'Already cancelled' });
+        if (booking.status === 'payment_processing') {
+            return res.status(409).json({ message: 'Booking confirmation is in progress' });
+        }
 
         const wasConfirmed = booking.status === 'confirmed';
 
@@ -214,7 +234,9 @@ exports.createRazorpayOrder = async (req, res) => {
         const order = await razorpay.orders.create({
             amount, // Razorpay expects the smallest currency unit (paise).
             currency: 'INR',
-            receipt: `receipt_${eventId}_${req.user.id}`,
+            // Razorpay limits receipt values to 40 characters. ObjectIds for
+            // both the event and user would make the previous value 57 chars.
+            receipt: `receipt_${eventId.slice(-8)}_${req.user.id.slice(-8)}_${Date.now().toString(36)}`,
         });
 
         // Reserve this specific order for this user and event. Payment verification

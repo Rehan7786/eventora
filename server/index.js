@@ -2,12 +2,15 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const mongoose = require('mongoose');
+
+// Load configuration before importing modules that read environment variables
+// (for example the Razorpay client).
+dotenv.config();
+
 const authRoutes = require('./routes/auth');
 const bookingRoutes = require('./routes/booking');
 const eventRoutes = require('./routes/event');                
 const { razorpayWebhook } = require('./controllers/bookingController');
-
-dotenv.config();
 
 
 const app = express();
@@ -22,18 +25,22 @@ app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/events', eventRoutes);           
 
-mongoose.connect(process.env.MONGO_URI, {
-  
-})
-  .then(() => console.log('MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+const port = process.env.PORT || 3000;
 
+const startServer = async () => {
+  if (!process.env.MONGO_URI) {
+    throw new Error('MONGO_URI must be configured');
+  }
 
+  await mongoose.connect(process.env.MONGO_URI);
+  console.log('MongoDB connected');
 
+  app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+  });
+};
 
-const port = process.env.PORT || 3000
-
-
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-}); 
+startServer().catch((error) => {
+  console.error('Unable to start server:', error.message);
+  process.exitCode = 1;
+});

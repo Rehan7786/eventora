@@ -7,18 +7,36 @@ const Login = () => {
     const [password, setPassword] = useState('');
     const [otp, setOtp] = useState('');
     const [showOTP, setShowOTP] = useState(false);
+    const [forgotPassword, setForgotPassword] = useState(false);
+    const [resetCode, setResetCode] = useState('');
+    const [resetCodeSent, setResetCodeSent] = useState(false);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
 
-    const { login, verifyOTP } = useContext(AuthContext);
+    const { login, verifyOTP, requestPasswordReset, resetPassword } = useContext(AuthContext);
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError('');
+        setSuccess('');
         try {
-            if (!showOTP) {
+            if (forgotPassword) {
+                if (!resetCodeSent) {
+                    const data = await requestPasswordReset(email);
+                    setSuccess(data.message);
+                    setResetCodeSent(true);
+                } else {
+                    const data = await resetPassword(email, resetCode, password);
+                    setSuccess(data.message);
+                    setForgotPassword(false);
+                    setResetCodeSent(false);
+                    setResetCode('');
+                    setPassword('');
+                }
+            } else if (!showOTP) {
                 const data = await login(email, password);
                 if (data.role === 'admin') navigate('/admin');
                 else navigate('/dashboard');
@@ -39,17 +57,75 @@ const Login = () => {
         }
     };
 
+    const showForgotPassword = () => {
+        setForgotPassword(true);
+        setShowOTP(false);
+        setResetCodeSent(false);
+        setError('');
+        setSuccess('');
+        setPassword('');
+    };
+
+    const showLogin = () => {
+        setForgotPassword(false);
+        setResetCodeSent(false);
+        setResetCode('');
+        setError('');
+        setSuccess('');
+        setPassword('');
+    };
+
     return (
         <div className="max-w-md mx-auto mt-20 bg-white p-8 rounded-xl shadow-lg border border-gray-100">
             <div className="text-center mb-8">
-                <h2 className="text-3xl font-extrabold text-gray-900 mb-2">Welcome Back</h2>
-                <p className="text-gray-500">Sign in to your Eventora account</p>
+                <h2 className="text-3xl font-extrabold text-gray-900 mb-2">{forgotPassword ? 'Reset Password' : 'Welcome Back'}</h2>
+                <p className="text-gray-500">{forgotPassword ? 'We will email you a one-time reset code.' : 'Sign in to your Eventora account'}</p>
             </div>
 
             {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-6 text-center shadow-inner border border-red-100">{error}</div>}
+            {success && <div className="bg-green-50 text-green-700 p-3 rounded-lg mb-6 text-center shadow-inner border border-green-100">{success}</div>}
 
             <form onSubmit={handleSubmit} className="space-y-6">
-                {!showOTP ? (
+                {forgotPassword ? (
+                    !resetCodeSent ? (
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
+                            <input
+                                type="email"
+                                required
+                                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gray-700 focus:border-gray-700 transition shadow-sm"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                            />
+                        </div>
+                    ) : (
+                        <>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Reset Code</label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="6-digit code"
+                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gray-700 transition shadow-sm font-bold tracking-widest text-center text-lg"
+                                    value={resetCode}
+                                    onChange={(e) => setResetCode(e.target.value)}
+                                    maxLength="6"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">New Password</label>
+                                <input
+                                    type="password"
+                                    required
+                                    minLength="8"
+                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-gray-700 focus:border-gray-700 transition shadow-sm"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                />
+                            </div>
+                        </>
+                    )
+                ) : !showOTP ? (
                     <>
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
@@ -91,13 +167,20 @@ const Login = () => {
                     disabled={loading}
                     className="w-full bg-gray-900 text-white font-bold py-3 rounded-lg hover:bg-black focus:ring-4 focus:ring-gray-200 transition shadow-md"
                 >
-                    {loading ? 'Processing...' : (showOTP ? 'Verify OTP & Log In' : 'Sign In')}
+                    {loading ? 'Processing...' : (forgotPassword ? (resetCodeSent ? 'Set New Password' : 'Send Reset Code') : (showOTP ? 'Verify OTP & Log In' : 'Sign In'))}
                 </button>
             </form>
 
-            <p className="text-center mt-8 text-gray-600">
-                Don't have an account? <Link to="/register" className="text-gray-900 font-bold hover:underline">Sign up</Link>
-            </p>
+            {forgotPassword ? (
+                <button type="button" onClick={showLogin} className="block mx-auto mt-8 text-gray-900 font-bold hover:underline">Back to sign in</button>
+            ) : (
+                <>
+                    {!showOTP && <button type="button" onClick={showForgotPassword} className="block mx-auto mt-6 text-gray-900 font-bold hover:underline">Forgot password?</button>}
+                    <p className="text-center mt-6 text-gray-600">
+                        Don't have an account? <Link to="/register" className="text-gray-900 font-bold hover:underline">Sign up</Link>
+                    </p>
+                </>
+            )}
         </div>
     );
 };
